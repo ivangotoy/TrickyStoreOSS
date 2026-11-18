@@ -222,12 +222,6 @@ static std::optional<int> transfer_fd_to_remote(int pid, const char *lib_path, s
     if (!remote_hdr)
         return std::nullopt;
 
-    args = {static_cast<uintptr_t>(remote_fd), remote_hdr, MSG_WAITALL};
-    if (!remote_pre_call(pid, regs, reinterpret_cast<uintptr_t>(funcs.recvmsg_addr), 0, args)) {
-        LOGE("Failed to start remote recvmsg call");
-        return std::nullopt;
-    }
-
     msg_hdr.msg_control = &cmsgbuf;
     msg_hdr.msg_name = &sock_addr;
     msg_hdr.msg_namelen = addr_len;
@@ -242,12 +236,15 @@ static std::optional<int> transfer_fd_to_remote(int pid, const char *lib_path, s
     cmsg->cmsg_type = SCM_RIGHTS;
     *reinterpret_cast<int *>(CMSG_DATA(cmsg)) = local_lib_fd;
 
+    // Queue the fd on the bound remote socket before the remote recvmsg starts: if sending fails, the target
+    // is still stopped and restorable instead of left running in a blocking recvmsg.
     if (sendmsg(local_socket, &msg_hdr, 0) == -1) {
         PLOGE("Failed to send fd to remote process");
         return std::nullopt;
     }
 
-    auto recvmsg_result = remote_post_call(pid, regs, 0, pending_signal);
+    args = {static_cast<uintptr_t>(remote_fd), remote_hdr, MSG_WAITALL};
+    auto recvmsg_result = remote_call(pid, regs, reinterpret_cast<uintptr_t>(funcs.recvmsg_addr), 0, args, pending_signal);
     if (!recvmsg_result) {
         LOGE("Remote recvmsg call failed");
         return std::nullopt;
