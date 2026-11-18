@@ -60,6 +60,9 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
     @Volatile private var realKeygenEmaMs: Double? = null
     private val pendingKeygenStarts = ConcurrentHashMap<String, Long>()
 
+    // keygens passed through untouched for an alias that still has forged state: the post-hook only drops that state
+    private val cleanupOnlyKeygens = ConcurrentHashMap.newKeySet<Key>()
+
     companion object {
         private const val DEFAULT_KEYGEN_MS = 3.0
         private const val MAX_PLAUSIBLE_TIMESTAMP_MS = 4_102_444_800_000L
@@ -364,12 +367,15 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 val params = data.createTypedArray(KeyParameter.CREATOR)!!
                 val aFlags = data.readInt()
                 val entropy = data.createByteArray()
+                // a real key replacing a forged alias must reach the post-hook so the forged state is dropped
+                val forgedAlias = keyDescriptor.alias?.let { Key(callingUid, it) }?.takeIf { keys.containsKey(it) }
+                fun passThrough(): Result = forgedAlias?.let { cleanupOnlyKeygens.add(it); Continue } ?: Skip
                 val hasSoftwareTarget = PkgConfig.needGenerate(callingUid)
                 val hasLeafTarget = PkgConfig.needHack(callingUid)
-                if (!hasSoftwareTarget && !hasLeafTarget) return Skip
+                if (!hasSoftwareTarget && !hasLeafTarget) return passThrough()
                 if (!softwarePolicySupported(params)) {
                     Logger.i("Forwarding unsupported or incomplete authorization policy uid=$callingUid")
-                    return Skip
+                    return passThrough()
                 }
                 val kgp = CertificateGen.KeyGenParameters(params)
                 val challenge = kgp.attestationChallenge
@@ -407,7 +413,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 if (attestationKeyDescriptor != null) {
                     val designated = resolveAuthorizedKey(callingUid, attestationKeyDescriptor, AccessAction.USE)
                     if (designated?.info == null) {
-                        return if (PkgConfig.needHack(callingUid)) forwardKeygen(keyDescriptor.alias, startNanos) else Skip
+                        return if (PkgConfig.needHack(callingUid)) forwardKeygen(keyDescriptor.alias, startNanos) else passThrough()
                     }
                     if (!designated.allowed) return errorReply(ResponseCode.PERMISSION_DENIED, "USE permission not granted")
                     if (designated.info.params.purpose != listOf(KeyPurpose.ATTEST_KEY)) {
@@ -478,7 +484,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                         )
                         return forwardKeygen(keyDescriptor.alias, startNanos)
                     }
-                    else -> return Skip
+                    else -> return passThrough()
                 }
             }
             raw.onFailure { Logger.e("parse key gen request", it) }
@@ -565,7 +571,10 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
             // failed forwarded keygen: drop its pending start, or the entry stays forever
             runCatching {
                 data.enforceInterface(IKeystoreSecurityLevel.DESCRIPTOR)
-                data.readTypedObject(KeyDescriptor.CREATOR)?.alias?.let { pendingKeygenStarts.remove(it) }
+                data.readTypedObject(KeyDescriptor.CREATOR)?.alias?.let {
+                    pendingKeygenStarts.remove(it)
+                    cleanupOnlyKeygens.remove(Key(callingUid, it))
+                }
             }
         }
         if (keygenSucceeded && reply != null) {
@@ -581,6 +590,8 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                         Logger.e("Unable to drop forged state replaced by a real key uid=$callingUid alias=${keyDescriptor.alias}")
                     }
                 }
+                // passed through only for the cleanup above: leave the real reply untouched
+                if (cleanupOnlyKeygens.remove(Key(callingUid, keyDescriptor.alias))) return@runCatching null
                 val metadata = reply.readTypedObject(KeyMetadata.CREATOR) ?: return@runCatching null
                 val chain =
                     with(CertificateUtils) {
