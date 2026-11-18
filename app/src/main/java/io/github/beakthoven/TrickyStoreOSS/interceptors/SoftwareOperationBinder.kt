@@ -502,7 +502,13 @@ private constructor(
                 val spec: java.security.spec.AlgorithmParameterSpec? =
                     when {
                         blockMode == KeymasterDefs.KM_MODE_GCM ->
-                            GCMParameterSpec(op.macLength ?: 128, op.nonce ?: ByteArray(12))
+                            GCMParameterSpec(
+                                op.macLength ?: 128,
+                                // no caller nonce: encrypt under a fresh random nonce (returned as NONCE), never a fixed one
+                                op.nonce ?: ByteArray(12).also {
+                                    if (opMode == Cipher.ENCRYPT_MODE) java.security.SecureRandom().nextBytes(it)
+                                },
+                            )
                         padding == KeymasterDefs.KM_PAD_RSA_OAEP ->
                             OAEPParameterSpec(
                                 operationDigestName(digest).replace("SHA", "SHA-"),
