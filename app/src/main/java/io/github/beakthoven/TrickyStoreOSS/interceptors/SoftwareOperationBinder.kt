@@ -313,6 +313,15 @@ private constructor(
                     KeymasterDefs.KM_ERROR_VERIFICATION_FAILED,
                     "GCM tag verification failed",
                 )
+            } catch (e: javax.crypto.IllegalBlockSizeException) {
+                // KeyMint IKeyMintOperation.finish: input that cannot be consumed -> INVALID_INPUT_LENGTH
+                throw ServiceSpecificException(KeymasterDefs.KM_ERROR_INVALID_INPUT_LENGTH, "Invalid input length")
+            } catch (e: javax.crypto.BadPaddingException) {
+                // KeyMint: AES PKCS7 decryption without valid padding -> INVALID_ARGUMENT; other keys keep the old code
+                if (keyParams.algorithm == Algorithm.AES) {
+                    throw ServiceSpecificException(KeymasterDefs.KM_ERROR_INVALID_ARGUMENT, "Invalid padding")
+                }
+                throw ServiceSpecificException(KeymasterDefs.KM_ERROR_VERIFICATION_FAILED, e.message ?: "operation failed")
             } catch (e: Throwable) {
                 throw ServiceSpecificException(
                     KeymasterDefs.KM_ERROR_VERIFICATION_FAILED,
