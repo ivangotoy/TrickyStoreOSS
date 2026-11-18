@@ -244,7 +244,10 @@ object CertificateGen {
 
             params.createdAtMs = params.createdAtMs ?: System.currentTimeMillis()
             val keyPair = generateKeyPair(params) ?: return null
-            val keybox = getKeyboxForAlgorithm(params.algorithm) ?: return null
+            val keybox = getKeyboxForAlgorithm(params.algorithm) ?: run {
+                Logger.e("No keybox available for algorithm ${params.algorithm}; cannot generate an attested key")
+                return null
+            }
             if (keybox.certificates.isEmpty()) {
                 Logger.e("Keybox has no certificates")
                 return null
@@ -392,7 +395,10 @@ object CertificateGen {
     fun generateChain(uid: Int, params: KeyGenParameters, keyPair: KeyPair, securityLevel: Int = 1): List<ByteArray>? {
         val raw = runCatching {
             params.createdAtMs = params.createdAtMs ?: System.currentTimeMillis()
-            val keybox = getKeyboxForAlgorithm(params.algorithm) ?: return null
+            val keybox = getKeyboxForAlgorithm(params.algorithm) ?: run {
+                Logger.e("No keybox available for algorithm ${params.algorithm}; cannot build a certificate chain")
+                return null
+            }
             val issuer = X509CertificateHolder(keybox.certificates[0].encoded).subject
             val leaf = buildCertificate(keyPair, keybox, params, issuer, uid, securityLevel)
             (listOf(leaf) + keybox.certificates).map { it.encoded }
