@@ -154,6 +154,10 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 }
                 else -> return null
             }
+            // APP lookups of aliases without forged state come from every app; don't grow usageLocks for them.
+            if (descriptor.domain == Domain.APP && !keys.containsKey(key)) {
+                return AuthorizedKey(key, null, provenance, accessVector, accessVector and action.permission != 0)
+            }
             return withKeyLock(key) {
                 if (descriptor.domain == Domain.KEY_ID && keysByNspace[descriptor.nspace] != key) return@withKeyLock null
                 if (descriptor.domain == Domain.GRANT && grants[descriptor.nspace]?.let {
