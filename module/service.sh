@@ -8,6 +8,8 @@ MODDIR=$(unset CDPATH; cd -- "$MODDIR" 2>/dev/null && pwd) || exit 1
 MAX_FAILURES=${TSOSS_SUPERVISOR_MAX_FAILURES:-5}
 STABILITY_SECONDS=${TSOSS_SUPERVISOR_STABILITY_SECONDS:-30}
 BACKOFF_MAX=${TSOSS_SUPERVISOR_BACKOFF_MAX:-16}
+MAX_RESTARTS=${TSOSS_SUPERVISOR_MAX_RESTARTS:-10}
+HEALTHY_SECONDS=${TSOSS_SUPERVISOR_HEALTHY_SECONDS:-300}
 LOCKDIR="$MODDIR/.service.lock"
 
 case "$MAX_FAILURES" in
@@ -19,9 +21,17 @@ esac
 case "$BACKOFF_MAX" in
   ''|*[!0-9]*|0) BACKOFF_MAX=16 ;;
 esac
+case "$MAX_RESTARTS" in
+  ''|*[!0-9]*|0) MAX_RESTARTS=10 ;;
+esac
+case "$HEALTHY_SECONDS" in
+  ''|*[!0-9]*|0) HEALTHY_SECONDS=300 ;;
+esac
 [ "$MAX_FAILURES" -gt 100 ] && MAX_FAILURES=100
 [ "$STABILITY_SECONDS" -gt 86400 ] && STABILITY_SECONDS=86400
 [ "$BACKOFF_MAX" -gt 300 ] && BACKOFF_MAX=300
+[ "$MAX_RESTARTS" -gt 1000 ] && MAX_RESTARTS=1000
+[ "$HEALTHY_SECONDS" -gt 86400 ] && HEALTHY_SECONDS=86400
 
 if [ "${1:-}" != --worker ] && [ "${TSOSS_SUPERVISOR_FOREGROUND:-false}" != true ]; then
   if command -v log >/dev/null 2>&1; then
@@ -134,6 +144,7 @@ run_supervisor() {
 
   failures=0
   backoff=1
+  slow_exits=0
 
   while [ "$failures" -lt "$MAX_FAILURES" ]; do
     attempt=$((failures + 1))
@@ -146,6 +157,14 @@ run_supervisor() {
     if [ "$runtime" -ge "$STABILITY_SECONDS" ]; then
       failures=0
       backoff=1
+      # Runs past the stability window reset the failure budget, so a daemon that keeps exiting after a
+      # slow start (e.g. a killed hung injector) is capped here; a run of HEALTHY_SECONDS clears the count.
+      [ "$runtime" -ge "$HEALTHY_SECONDS" ] && slow_exits=0
+      slow_exits=$((slow_exits + 1))
+      if [ "$slow_exits" -ge "$MAX_RESTARTS" ]; then
+        echo "TrickyStoreOSS: daemon exited $status after ${runtime}s; restart limit reached ($slow_exits runs past the stability window)"
+        return 1
+      fi
       echo "TrickyStoreOSS: daemon attempt $attempt exited $status after ${runtime}s; stability reset"
       continue
     fi
