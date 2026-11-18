@@ -91,7 +91,7 @@ object PkgConfig {
                 Logger.e("failed to update keybox; previous snapshot retained")
             }
         }
-        raw.onFailure { Logger.e("failed to read keybox file") }
+        raw.onFailure { Logger.e("failed to read keybox file (${it::class.java.simpleName})") }
     }
 
     private const val CONFIG_PATH = "/data/adb/tricky_store"
