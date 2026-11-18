@@ -473,6 +473,8 @@ object PersistenceManager {
         return result
     }
 
+    fun hasRecord(uid: Int, alias: String): Boolean = fileFor(uid, alias).exists()
+
     fun deleteKey(uid: Int, alias: String): Boolean = synchronized(keyLock(uid, alias)) {
         runCatching {
             val file = fileFor(uid, alias)

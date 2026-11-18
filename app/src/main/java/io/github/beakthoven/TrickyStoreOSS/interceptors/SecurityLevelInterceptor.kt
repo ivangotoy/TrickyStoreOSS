@@ -313,8 +313,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         @Keep
         fun cleanupKey(uid: Int, alias: String): Boolean {
             val k = Key(uid, alias)
-            return withKeyLock(k) {
-                if (!PersistenceManager.deleteKey(uid, alias)) return@withKeyLock false
+            val dropState = {
                 keysByNspace.values.removeIf { it == k }
                 keys.remove(k)
                 keyPairs.remove(k)
@@ -325,6 +324,21 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 grants.values.removeIf { it.key == k }
                 CertificateHack.leafAlgorithms.remove(CertificateHack.KeyIdentifier(alias, uid))
                 true
+            }
+            // every successful delete by any app lands here: without forged or persisted state there is nothing
+            // the lock protects, so don't create permanent usageLocks / PersistenceManager lock entries for it;
+            // touch only what a non-forged key can have, so a forged key stored concurrently is left alone
+            if (!keys.containsKey(k) && !PersistenceManager.hasRecord(uid, alias)) {
+                keysByNspace.values.removeIf { it == k }
+                skipLeafHacks.remove(k)
+                patchedResponses.remove(k)
+                grants.values.removeIf { it.key == k }
+                CertificateHack.leafAlgorithms.remove(CertificateHack.KeyIdentifier(alias, uid))
+                return true
+            }
+            return withKeyLock(k) {
+                if (!PersistenceManager.deleteKey(uid, alias)) return@withKeyLock false
+                dropState()
             }
         }
 
