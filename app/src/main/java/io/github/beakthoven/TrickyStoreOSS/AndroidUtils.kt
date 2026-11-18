@@ -53,9 +53,11 @@ object AndroidUtils {
     private fun persistedBootKey(): ByteArray {
         val file = File("/data/adb/tricky_store/boot_key")
         return runCatching {
-                if (file.exists()) {
-                    file.readText().trim().hexToByteArray()
+                val stored = if (file.exists()) parseBootKeyHex(file.readText()) else null
+                if (stored != null) {
+                    stored
                 } else {
+                    if (file.exists()) Logger.w("boot_key is not 64 hex characters; regenerating it")
                     file.parentFile?.mkdirs()
                     val key = randomBytes()
                     file.writeBytesAtomically(key.toHex().toByteArray())
@@ -334,6 +336,14 @@ object AndroidUtils {
             MessageDigest.getInstance("SHA-256").digest(it)
         } ?: CachedAttestData?.moduleHash ?: ByteArray(32).also { Logger.e("Failed to source module hash") }
     }
+}
+
+// A persisted boot key is 32 bytes as 64 hex characters (surrounding whitespace allowed); anything else is unusable.
+@OptIn(ExperimentalStdlibApi::class)
+fun parseBootKeyHex(text: String): ByteArray? {
+    val hex = text.trim()
+    if (hex.length != 64 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+    return hex.hexToByteArray()
 }
 
 fun String.trimLine(): String = trim().split("\n").joinToString("\n") { it.trim() }
