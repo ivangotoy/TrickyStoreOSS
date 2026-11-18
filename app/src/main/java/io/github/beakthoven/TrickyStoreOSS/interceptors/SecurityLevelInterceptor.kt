@@ -559,7 +559,8 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         reply: Parcel?,
         resultCode: Int,
     ): Result {
-        val keygenSucceeded = code == generateKeyTransaction && reply != null && !reply.hasException()
+        val keygenSucceeded =
+            code == generateKeyTransaction && resultCode == 0 && reply != null && !reply.hasException()
         if (code == generateKeyTransaction && !keygenSucceeded) {
             // failed forwarded keygen: drop its pending start, or the entry stays forever
             runCatching {
