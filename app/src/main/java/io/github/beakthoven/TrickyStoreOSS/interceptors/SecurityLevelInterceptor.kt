@@ -287,11 +287,14 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         private fun persistUsageState(key: Key): Boolean {
             val info = keys[key] ?: return false
             val metadata = marshalMetadata(info.response.metadata) ?: return false
+            // a record saved without its owner fingerprint is withheld on the next load: fail closed instead
+            val ownerIdentity = PkgConfig.getPm()?.let { AndroidUtils.packageSigningIdentityFingerprint(it, key.uid) }
+                ?: return false
             return PersistenceManager.saveKey(
                 key.uid, key.alias, info.response.metadata.keySecurityLevel, skipLeafHacks[key] == true,
                 info.response.metadata.key?.nspace ?: 0L, Domain.KEY_ID, info.keyPair, info.secretKey,
                 keyPairs[key]?.second, metadata, info.params, currentUseState(key, info.params),
-                PkgConfig.getPm()?.let { AndroidUtils.packageSigningIdentityFingerprint(it, key.uid) },
+                ownerIdentity,
             )
         }
 
