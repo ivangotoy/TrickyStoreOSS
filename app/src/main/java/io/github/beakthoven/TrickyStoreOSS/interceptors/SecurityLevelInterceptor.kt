@@ -501,7 +501,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                         "Forced operations require system privilege",
                     )
                 }
-                val key = resolveKey(callingUid, descriptor)
+                val key = resolved.key
                 if (key != null &&
                     ((info.params.usageCountLimit > 0 && (usageRemaining[key] ?: info.params.usageCountLimit) <= 0) ||
                         (info.params.maxUsesPerBoot > 0 && (perBootRemaining[key] ?: info.params.maxUsesPerBoot) <= 0))
@@ -520,7 +520,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 Logger.d(
                     "createOperation: serving software operation for uid=$callingUid alias=${descriptor.alias} nspace=${descriptor.nspace}"
                 )
-                val op = SoftwareOperationBinder.create(info, opRequest, resolveKey(callingUid, descriptor))
+                val op = SoftwareOperationBinder.create(info, opRequest, resolved.key)
                 val response =
                     CreateOperationResponse().apply {
                         iOperation = op
