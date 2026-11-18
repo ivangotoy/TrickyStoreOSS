@@ -508,8 +508,10 @@ object CertificateGen {
             file.readBytes()
         } else {
             val k = ByteArray(32).also { SecureRandom().nextBytes(it) }
-            file.parentFile?.mkdirs()
-            file.writeBytes(k)
+            runCatching {
+                file.parentFile?.mkdirs()
+                file.writeBytesAtomically(k)
+            }.onFailure { Logger.e("Failed to persist hbk, using an ephemeral key until restart", it) }
             k
         }
     }
