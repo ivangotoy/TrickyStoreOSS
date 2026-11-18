@@ -563,6 +563,14 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                 data.enforceInterface(IKeystoreSecurityLevel.DESCRIPTOR)
                 val keyDescriptor = data.readTypedObject(KeyDescriptor.CREATOR) ?: return@runCatching null
                 recordRealKeygen(keyDescriptor.alias)
+                if (keys.containsKey(Key(callingUid, keyDescriptor.alias))) {
+                    // the real keystore now owns this alias; stop serving the forged key it replaced
+                    if (cleanupKey(callingUid, keyDescriptor.alias)) {
+                        Logger.i("Dropped forged state replaced by a real key uid=$callingUid alias=${keyDescriptor.alias}")
+                    } else {
+                        Logger.e("Unable to drop forged state replaced by a real key uid=$callingUid alias=${keyDescriptor.alias}")
+                    }
+                }
                 val metadata = reply.readTypedObject(KeyMetadata.CREATOR) ?: return@runCatching null
                 val chain =
                     with(CertificateUtils) {
