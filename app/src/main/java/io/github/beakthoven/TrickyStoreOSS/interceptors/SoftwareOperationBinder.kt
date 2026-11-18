@@ -275,7 +275,13 @@ private constructor(
         synchronized(this) {
             checkActive()
             checkInput(input)
-            engine.update(input)
+            try {
+                engine.update(input)
+            } catch (e: Throwable) {
+                // keystore2 operation.rs discards an operation on any error; later calls get INVALID_OPERATION_HANDLE
+                active = false
+                throw e
+            }
         }
 
     @Throws(RemoteException::class)
