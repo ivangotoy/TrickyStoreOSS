@@ -14,7 +14,12 @@ import android.security.Credentials
 import android.security.KeyStore
 import android.security.keystore.KeystoreResponse
 import io.github.beakthoven.TrickyStoreOSS.logging.Logger
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
+
+// ./inject has no timeout of its own (unbounded waitpid on the ptrace target). A normal run is one attach,
+// about a dozen remote calls and one dlopen, far below this; the bound only catches a hung injector.
+private const val INJECT_TIMEOUT_SECONDS = 60L
 
 abstract class BaseKeystoreInterceptor : BinderInterceptor() {
 
@@ -79,6 +84,13 @@ abstract class BaseKeystoreInterceptor : BinderInterceptor() {
         Logger.d("Injection command: ${command.joinToString(" ")}")
 
         val process = Runtime.getRuntime().exec(command)
+
+        if (!process.waitFor(INJECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            Logger.e("Injector did not finish within ${INJECT_TIMEOUT_SECONDS}s; killed it")
+            Logger.e("Injection failed! Daemon will exit")
+            exitProcess(1)
+        }
 
         if (process.waitFor() != 0) {
             Logger.e("Injection failed! Daemon will exit")
