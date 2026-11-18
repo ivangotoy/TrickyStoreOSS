@@ -128,6 +128,9 @@ cfg="$TMP/fresh/root/data/adb/tricky_store"
 cmp -s "$cfg/keybox.xml" "$MODULE/keybox.xml" || fail "default keybox not installed"
 cmp -s "$cfg/target.txt" "$MODULE/target.txt" || fail "default target.txt not installed"
 grep -q "Installing Tricky Store OSS REPLACEMEVER" "$TMP/fresh/log" || fail "version line missing"
+[ "$(stat -c %a "$cfg")" = 700 ] || fail "config dir is not 0700"
+[ "$(stat -c %a "$cfg/keybox.xml")" = 600 ] || fail "keybox.xml is not 0600"
+[ "$(stat -c %a "$cfg/target.txt")" = 600 ] || fail "target.txt is not 0600"
 
 # --- customize.sh: x64 picks the x86_64 libraries ---
 status=$(run_customize x64 ARCH=x64)
@@ -138,10 +141,16 @@ grep -q 'synthetic x86_64 lib' "$TMP/x64/modpath/libTrickyStoreOSS.so" || fail "
 mkdir -p "$TMP/keep/root/data/adb/tricky_store"
 echo '<synthetic-user-keybox/>' > "$TMP/keep/root/data/adb/tricky_store/keybox.xml"
 echo 'com.example.synthetic' > "$TMP/keep/root/data/adb/tricky_store/target.txt"
+echo 'all=2020-01-01' > "$TMP/keep/root/data/adb/tricky_store/security_patch.txt"
+chmod 0755 "$TMP/keep/root/data/adb/tricky_store"
+chmod 0644 "$TMP/keep/root/data/adb/tricky_store/keybox.xml" "$TMP/keep/root/data/adb/tricky_store/security_patch.txt"
 status=$(run_customize keep)
 [ "$status" -eq 0 ] || { case_log keep; fail "upgrade install failed"; }
 grep -qx '<synthetic-user-keybox/>' "$TMP/keep/root/data/adb/tricky_store/keybox.xml" || fail "user keybox overwritten"
 grep -qx 'com.example.synthetic' "$TMP/keep/root/data/adb/tricky_store/target.txt" || fail "user target.txt overwritten"
+[ "$(stat -c %a "$TMP/keep/root/data/adb/tricky_store")" = 700 ] || fail "upgrade left config dir open"
+[ "$(stat -c %a "$TMP/keep/root/data/adb/tricky_store/keybox.xml")" = 600 ] || fail "upgrade left keybox.xml readable"
+[ "$(stat -c %a "$TMP/keep/root/data/adb/tricky_store/security_patch.txt")" = 600 ] || fail "upgrade left security_patch.txt readable"
 
 # --- customize.sh: conflicting modules are flagged for removal ---
 mkdir -p "$TMP/conflict/root/data/adb/modules/teesim" "$TMP/conflict/root/data/adb/modules/oh_my_keymint"
@@ -252,4 +261,4 @@ status=$(run_update_binary ub-ok 20400)
 [ "$status" -eq 0 ] || fail "update-binary with Magisk 20400 failed"
 grep -q "install_module zip=$TMP/ub-ok/synthetic.zip" "$TMP/ub-ok/log" || fail "install_module not called with the zip"
 
-echo 'PASS: customize refusals/fresh/x64/upgrade/conflicts/apk/missing payloads, daemon classpath, post-fs-data, update-binary'
+echo 'PASS: customize refusals/fresh/x64/upgrade/conflicts/apk/missing payloads/config modes, daemon classpath, post-fs-data, update-binary'

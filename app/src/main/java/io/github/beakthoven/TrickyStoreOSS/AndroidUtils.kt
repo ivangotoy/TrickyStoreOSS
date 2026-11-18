@@ -348,11 +348,15 @@ fun parseBootKeyHex(text: String): ByteArray? {
 
 fun String.trimLine(): String = trim().split("\n").joinToString("\n") { it.trim() }
 
-// Write to <name>.tmp, fsync, then rename over the target, so a crash leaves the old file or the new one.
+// Write <name>.tmp (mode 0600), fsync, rename over the target: a crash leaves the old file or the new one.
 fun File.writeBytesAtomically(bytes: ByteArray) {
     val tmp = File(absoluteFile.parentFile, "$name.tmp")
     try {
         FileOutputStream(tmp).use { out ->
+            java.nio.file.Files.setPosixFilePermissions(
+                tmp.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"),
+            )
             out.write(bytes)
             out.fd.sync()
         }

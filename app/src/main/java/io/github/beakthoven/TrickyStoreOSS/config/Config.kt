@@ -16,6 +16,7 @@ import io.github.beakthoven.TrickyStoreOSS.AttestUtils
 import io.github.beakthoven.TrickyStoreOSS.KeyBoxUtils
 import io.github.beakthoven.TrickyStoreOSS.interceptors.SecurityLevelInterceptor
 import io.github.beakthoven.TrickyStoreOSS.logging.Logger
+import io.github.beakthoven.TrickyStoreOSS.writeBytesAtomically
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -136,11 +137,11 @@ object PkgConfig {
         }
         val statusFile = File(root, TEE_STATUS_FILE)
         try {
-            statusFile.writeText(
-                "status=${result.status}\n" +
+            statusFile.writeBytesAtomically(
+                ("status=${result.status}\n" +
                     "category=${result.failureCategory ?: "none"}\n" +
                     "serviceErrorCode=${result.serviceErrorCode ?: "none"}\n" +
-                    "teeBroken=${teeBroken ?: "unknown"}",
+                    "teeBroken=${teeBroken ?: "unknown"}").toByteArray(),
             )
             Logger.i(
                 "TEE status written to $statusFile: status=${result.status}, " +
@@ -173,7 +174,15 @@ object PkgConfig {
     }
 
     fun initialize() {
-        root.mkdirs()
+        if (!root.exists() && root.mkdirs()) {
+            // recreated by the daemon: same root-only mode the installer sets
+            runCatching {
+                java.nio.file.Files.setPosixFilePermissions(
+                    root.toPath(),
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"),
+                )
+            }.onFailure { Logger.e("Failed to restrict $root (${it::class.java.simpleName})") }
+        }
         val scope = File(root, TARGET_FILE)
         if (scope.exists()) {
             updateTargetPackages(scope)

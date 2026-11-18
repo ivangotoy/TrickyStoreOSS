@@ -95,3 +95,11 @@ if [ ! -f "$CONFIG_DIR/target.txt" ]; then
   ui_print "- Adding default target scope"
   install_file "target.txt" "$CONFIG_DIR"
 fi
+
+# Config holds the keybox private key: root-only directory and files
+chmod 0700 "$CONFIG_DIR"
+for file in keybox.xml target.txt security_patch.txt boot_key hbk tee_status; do
+  if [ -f "$CONFIG_DIR/$file" ]; then
+    chmod 0600 "$CONFIG_DIR/$file"
+  fi
+done
