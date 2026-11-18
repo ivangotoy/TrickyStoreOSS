@@ -309,7 +309,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
             val k = Key(uid, alias)
             return withKeyLock(k) {
                 if (!PersistenceManager.deleteKey(uid, alias)) return@withKeyLock false
-                keys[k]?.response?.metadata?.key?.nspace?.let { keysByNspace.remove(it) }
+                keysByNspace.values.removeIf { it == k }
                 keys.remove(k)
                 keyPairs.remove(k)
                 skipLeafHacks.remove(k)
@@ -594,7 +594,11 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                     }
                 patchedResponses[Key(callingUid, keyDescriptor.alias)] = response
                 metadata.key?.nspace?.let { nspace ->
-                    if (nspace != 0L) keysByNspace[nspace] = Key(callingUid, keyDescriptor.alias)
+                    if (nspace != 0L) {
+                        // the alias's previous real key is gone; don't keep its nspace mapped to the new one
+                        keysByNspace.values.removeIf { it == Key(callingUid, keyDescriptor.alias) }
+                        keysByNspace[nspace] = Key(callingUid, keyDescriptor.alias)
+                    }
                 }
                 Logger.i("Patched generateKey chain for uid=$callingUid alias=${keyDescriptor.alias}")
                 typedReply(metadata)
