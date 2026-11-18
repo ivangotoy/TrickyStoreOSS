@@ -100,14 +100,6 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
 
         @Keep val patchedResponses = ConcurrentHashMap<Key, KeyEntryResponse>()
 
-        @Keep fun getKeyPairs(uid: Int, alias: String): Pair<KeyPair, List<Certificate>>? = keyPairs[Key(uid, alias)]
-
-        @Keep
-        fun findAliasForNspace(uid: Int, nspace: Long): String? {
-            val key = keysByNspace[nspace]?.takeIf { it.uid == uid } ?: return null
-            return key.alias
-        }
-
         enum class AccessAction(val permission: Int) {
             GET_INFO(KeyPermission.GET_INFO),
             USE(KeyPermission.USE),
