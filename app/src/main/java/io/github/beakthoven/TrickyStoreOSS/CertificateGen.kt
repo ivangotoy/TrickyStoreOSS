@@ -316,6 +316,13 @@ object CertificateGen {
             info.response.metadata?.authorizations
                 ?.filter { it.securityLevel == securityLevel && it.keyParameter.tag == Tag.PURPOSE }
                 ?.map { it.keyParameter.value.keyPurpose }
+        if (certificates.isNullOrEmpty()) {
+            // AOSP keystore2 attestation_key_utils.rs: "Successfully loaded key entry, but cert was missing"
+            throw ServiceSpecificException(
+                android.system.keystore2.ResponseCode.INVALID_ARGUMENT,
+                "Designated attestation key has no certificate",
+            )
+        }
         val attestPurpose = storedPurposes == listOf(KeyPurpose.ATTEST_KEY)
         val supportedAlgorithm = keyPair?.private is java.security.interfaces.ECPrivateKey ||
             keyPair?.private is java.security.interfaces.RSAPrivateKey

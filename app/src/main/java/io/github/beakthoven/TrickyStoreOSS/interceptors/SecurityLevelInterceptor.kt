@@ -444,13 +444,19 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
                             return forwardKeygen(keyDescriptor.alias, startNanos)
                         }
                         val pair =
-                            CertificateGen.generateKeyPair(
-                                callingUid,
-                                keyDescriptor,
-                                attestationKeyDescriptor,
-                                kgp,
-                                level,
-                            ) ?: return errorReply(KeymasterDefs.KM_ERROR_UNKNOWN_ERROR, "Software attestation generation failed")
+                            try {
+                                CertificateGen.generateKeyPair(
+                                    callingUid,
+                                    keyDescriptor,
+                                    attestationKeyDescriptor,
+                                    kgp,
+                                    level,
+                                )
+                            } catch (e: ServiceSpecificException) {
+                                // rejected designated attestation key: answer like keystore2, don't forward it
+                                Logger.i("Rejecting designated attestation key uid=$callingUid alias=${keyDescriptor.alias}: ${e.message}")
+                                return errorReply(e.errorCode, e.message ?: "Invalid attestation key")
+                            } ?: return errorReply(KeymasterDefs.KM_ERROR_UNKNOWN_ERROR, "Software attestation generation failed")
                         return storeGeneratedKey(
                             callingUid,
                             keyDescriptor,
