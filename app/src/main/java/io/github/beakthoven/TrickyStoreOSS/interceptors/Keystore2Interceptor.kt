@@ -378,9 +378,8 @@ object Keystore2Interceptor : BaseKeystoreInterceptor() {
             val existing = reply.createTypedArray(KeyDescriptor.CREATOR) ?: emptyArray<KeyDescriptor?>()
             val existingAliases = existing.mapNotNull { it?.alias }.toMutableSet()
             val toAdd = ArrayList<KeyDescriptor>()
-            for (k in SecurityLevelInterceptor.keys.keys.filter { it.uid == callingUid }) {
-                val alias = k.alias
-                if (batched && startPastAlias != null && alias <= startPastAlias) continue
+            val forgedAliases = SecurityLevelInterceptor.keys.keys.filter { it.uid == callingUid }.map { it.alias }
+            for (alias in InterceptorUtils.forgedAliasesForBatch(forgedAliases, existingAliases, batched, startPastAlias)) {
                 if (alias in existingAliases) continue
                 val kd = KeyDescriptor()
                 kd.domain = 0

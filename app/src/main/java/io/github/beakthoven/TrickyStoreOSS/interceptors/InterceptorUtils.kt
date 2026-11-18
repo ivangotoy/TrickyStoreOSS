@@ -169,6 +169,26 @@ object InterceptorUtils {
         return BinderInterceptor.OverrideReply(0, p)
     }
 
+    /**
+     * Forged aliases to merge into one listEntries / listEntriesBatched reply. AndroidKeyStoreSpi pages with
+     * startPastAlias = last alias returned and stops on an empty batch, so a non-empty real batch may only gain
+     * forged aliases below its last real alias (the real batch may be truncated); the rest come with the final,
+     * empty real batch.
+     */
+    fun forgedAliasesForBatch(
+        forged: Collection<String>,
+        realAliases: Collection<String>,
+        batched: Boolean,
+        startPastAlias: String?,
+    ): List<String> {
+        val lastReal = realAliases.maxOrNull()
+        return forged
+            .filter { it !in realAliases }
+            .filter { !batched || startPastAlias == null || it > startPastAlias }
+            .filter { !batched || lastReal == null || it < lastReal }
+            .sorted()
+    }
+
     fun String.extractAlias(): String =
         sequenceOf(
             Credentials.USER_PRIVATE_KEY,
