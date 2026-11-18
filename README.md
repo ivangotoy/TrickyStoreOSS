@@ -111,7 +111,7 @@ Dates can be written as `YYYY-MM-DD`, `YYYYMMDD`, or `YYYYMM`. `YYYY`, `MM`, and
 #### Special keywords
 
 - `no` omits that patch level tag entirely. The attestation reports nothing for it.
-- `device_default` keeps the device's real value for that component.
+- `device_default` keeps the device's real value for that component. With leaf hacking that is the value in the TEE certificate; generated certificates have no real value, so all three levels fall back to the system security patch (`ro.build.version.security_patch`).
 - `prop` mirrors the system security-patch prop (`ro.build.version.security_patch`). It is kept for backward compatibility; `device_default` is the more accurate name for new configs.
 
 #### Examples
