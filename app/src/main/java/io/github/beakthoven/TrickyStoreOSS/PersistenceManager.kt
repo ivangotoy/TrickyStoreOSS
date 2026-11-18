@@ -119,6 +119,7 @@ object PersistenceManager {
         useState: UseState?,
         ownerIdentityFingerprint: ByteArray? = null,
     ): Boolean = synchronized(keyLock(uid, alias)) {
+        var tmpFile: File? = null
         runCatching {
             require(uid >= 0 && alias.isNotEmpty() && alias.length <= MAX_ALIAS_LENGTH)
             require(ownerIdentityFingerprint == null || ownerIdentityFingerprint.size == 32)
@@ -133,6 +134,7 @@ object PersistenceManager {
             val snapshot = serializeSnapshot(uid, alias, securityLevel, skipLeafHack, nspace, domain, keyPair, secretKey, chain, metadataBytes, params, useState, ownerIdentityFingerprint)
             require(snapshot.size <= MAX_RECORD_BYTES)
             val tmp = File(parent, "${file.name}.tmp")
+            tmpFile = tmp
             FileOutputStream(tmp).use { fos ->
                 android.system.Os.chmod(tmp.absolutePath, 0x180)
                 fos.write(snapshot)
@@ -152,7 +154,11 @@ object PersistenceManager {
                 android.system.Os.close(directoryFd)
             }
             true
-        }.onFailure { Logger.e("Failed to persist key uid=$uid", it) }.getOrDefault(false)
+        }.onFailure {
+            // the temp snapshot holds private key bytes; don't leave it behind
+            tmpFile?.takeIf { f -> f.exists() }?.delete()
+            Logger.e("Failed to persist key uid=$uid", it)
+        }.getOrDefault(false)
     }
 
     private fun serializeSnapshot(
