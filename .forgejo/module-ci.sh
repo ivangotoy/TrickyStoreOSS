@@ -163,19 +163,27 @@ for k, v in (("version", version), ("versionCode", vc), ("updateJson", url)):
     if k not in seen:
         lines.append(f"{k}={v}")
 prop = ("\n".join(lines) + "\n").encode()
+# install-time checks that pin module.prop (module.prop.sha256, verify scripts listing
+# its sha256) are updated by replacing the old hash wherever an entry holds it
+old_h = hashlib.sha256(zin.read("module.prop")).hexdigest().encode()
+new_h = hashlib.sha256(prop).hexdigest().encode()
 with zipfile.ZipFile(dst, "w") as zout:
     for info in zin.infolist():
         data = zin.read(info)
         if info.filename == "module.prop":
             data = prop
-        elif info.filename == "module.prop.sha256":
-            data = hashlib.sha256(prop).hexdigest().encode()
+        elif old_h in data:
+            data = data.replace(old_h, new_h)
+            print(f"==> module.prop hash updated in {info.filename}", file=sys.stderr)
         zi = zipfile.ZipInfo(info.filename, info.date_time)
         zi.compress_type, zi.external_attr, zi.create_system = info.compress_type, info.external_attr, info.create_system
         zout.writestr(zi, data, compresslevel=9 if info.compress_type == zipfile.ZIP_DEFLATED else None)
 # every <file>.sha256 entry must hold the hash of <file>
 z = zipfile.ZipFile(dst)
 names = set(z.namelist())
+for n in names:
+    if n != "module.prop" and old_h != new_h and old_h in z.read(n):
+        sys.exit(f"{n} still holds the old module.prop hash")
 for n in names:
     if n.endswith(".sha256") and n[:-7] in names:
         want = z.read(n).decode().split()[0].strip()
