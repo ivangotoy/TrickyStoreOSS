@@ -17,6 +17,8 @@ import io.github.beakthoven.TrickyStoreOSS.config.PkgConfig
 import io.github.beakthoven.TrickyStoreOSS.logging.Logger
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -56,7 +58,7 @@ object AndroidUtils {
                 } else {
                     file.parentFile?.mkdirs()
                     val key = randomBytes()
-                    file.writeText(key.toHex())
+                    file.writeBytesAtomically(key.toHex().toByteArray())
                     key
                 }
             }
@@ -335,5 +337,20 @@ object AndroidUtils {
 }
 
 fun String.trimLine(): String = trim().split("\n").joinToString("\n") { it.trim() }
+
+// Write to <name>.tmp, fsync, then rename over the target, so a crash leaves the old file or the new one.
+fun File.writeBytesAtomically(bytes: ByteArray) {
+    val tmp = File(absoluteFile.parentFile, "$name.tmp")
+    try {
+        FileOutputStream(tmp).use { out ->
+            out.write(bytes)
+            out.fd.sync()
+        }
+        if (!tmp.renameTo(this)) throw IOException("Cannot replace $name")
+    } catch (e: Throwable) {
+        tmp.delete()
+        throw e
+    }
+}
 
 @OptIn(ExperimentalStdlibApi::class) fun ByteArray.toHex(): String = toHexString(HexFormat.Default)
