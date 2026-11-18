@@ -195,6 +195,10 @@ object Keystore2Interceptor : BaseKeystoreInterceptor() {
                 }
                 val key = resolved?.key
                 if (key != null && SecurityLevelInterceptor.keys.containsKey(key)) {
+                    // keystore2 permission.rs check_grant_permission: "Grant permission cannot be granted."
+                    if (accessVector and android.system.keystore2.KeyPermission.GRANT != 0) {
+                        return@runCatching errorReply(ResponseCode.PERMISSION_DENIED, "Grant permission cannot be granted")
+                    }
                     return@runCatching SecurityLevelInterceptor.withKeyLock(key) {
                         if (!SecurityLevelInterceptor.keys.containsKey(key)) return@withKeyLock Skip
                         val existing =
