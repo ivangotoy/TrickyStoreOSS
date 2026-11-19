@@ -50,7 +50,7 @@ private const val MAX_ATTESTATION_CHALLENGE_BYTES = 128
 class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, private val level: Int) :
     BinderInterceptor() {
     override val interceptedCodes: IntArray by lazy {
-        intArrayOf(generateKeyTransaction, createOperationTransaction, importKeyTransaction)
+        intArrayOf(generateKeyTransaction, createOperationTransaction, importKeyTransaction, importWrappedKeyTransaction)
             .filter { it >= 0 }
             .toIntArray()
     }
@@ -70,6 +70,8 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         private val createOperationTransaction =
             getTransactCode(IKeystoreSecurityLevel.Stub::class.java, "createOperation")
         private val importKeyTransaction = getTransactCode(IKeystoreSecurityLevel.Stub::class.java, "importKey")
+        private val importWrappedKeyTransaction =
+            runCatching { getTransactCode(IKeystoreSecurityLevel.Stub::class.java, "importWrappedKey") }.getOrDefault(-1)
 
         private val secureRandom = SecureRandom()
 
@@ -373,6 +375,10 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
             // a real import replacing a forged alias (also of a uid no longer targeted) must reach the post-hook
             return if (hasForgedAlias(callingUid, data)) Continue else Skip
         }
+        if (code == importWrappedKeyTransaction) {
+            // importWrappedKey(KeyDescriptor key, ...) also creates a real key under the alias
+            return if (hasForgedAlias(callingUid, data)) Continue else Skip
+        }
         if (code == generateKeyTransaction) {
             val startNanos = System.nanoTime()
             Logger.d("intercept key gen uid=$callingUid pid=$callingPid")
@@ -637,7 +643,7 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
             val result = raw.onFailure { Logger.e("patch generateKey reply", it) }.getOrNull()
             if (result != null) return result
         }
-        if (code == importKeyTransaction && reply != null && !reply.hasException()) {
+        if ((code == importKeyTransaction || code == importWrappedKeyTransaction) && reply != null && !reply.hasException()) {
             val raw = runCatching {
                 data.enforceInterface(IKeystoreSecurityLevel.DESCRIPTOR)
                 val keyDescriptor = data.readTypedObject(KeyDescriptor.CREATOR) ?: return@runCatching
