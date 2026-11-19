@@ -226,7 +226,7 @@ status=$(run_daemon daemon-apk)
 grep -qx -- "-Djava.class.path=$TMP/daemon-apk/mod/service.apk" "$TMP/daemon-apk/app_process.args" ||
   fail "daemon did not fall back to service.apk"
 
-# --- post-fs-data.sh: no-op that must succeed ---
+# --- post-fs-data.sh: must succeed without a supervisor lock ---
 sh "$MODULE/post-fs-data.sh" || fail "post-fs-data.sh failed"
 
 # --- update-binary: refuses without Magisk, hands over to install_module ---

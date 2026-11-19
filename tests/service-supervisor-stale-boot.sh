@@ -7,6 +7,7 @@ set -eu
 
 ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 SERVICE="$ROOT/module/service.sh"
+POST_FS_DATA="$ROOT/module/post-fs-data.sh"
 TMP=${TMPDIR:-/tmp}/tsoss-stale-boot-test.$$
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP"
@@ -26,6 +27,7 @@ setup_case() {
   dir="$TMP/$1"
   mkdir -p "$dir/.service.lock"
   cp "$SERVICE" "$dir/service.sh"
+  cp "$POST_FS_DATA" "$dir/post-fs-data.sh"
   cat > "$dir/daemon" <<'MOCK'
 #!/bin/sh
 echo run >> "$MOCK_LOG"
@@ -105,6 +107,41 @@ run_worker old-reaped-now
 expect_untouched old-reaped-now
 [ -d "$TMP/old-reaped-now/.service.lock/reap.$CURRENT_BOOT" ] || fail "old-reaped-now: the other reaper's dir was removed"
 
+# --- post-fs-data.sh (once per boot, before service.sh) drops leftovers of earlier boots that
+# carry no complete boot_id; the worker then starts the daemon ---
+run_boot() {
+  sh "$TMP/$1/post-fs-data.sh" || fail "$1: post-fs-data.sh failed"
+  run_worker "$1"
+}
+
+setup_case boot-empty-lock
+run_boot boot-empty-lock
+expect_reclaimed boot-empty-lock
+
+setup_case boot-zero-length-pid
+: > "$TMP/boot-zero-length-pid/.service.lock/pid"
+run_boot boot-zero-length-pid
+expect_reclaimed boot-zero-length-pid
+
+setup_case boot-pid-starttime-no-boot-id
+printf '%s\n' "$DEAD_PID" > "$TMP/boot-pid-starttime-no-boot-id/.service.lock/pid"
+printf '1\n' > "$TMP/boot-pid-starttime-no-boot-id/.service.lock/starttime"
+run_boot boot-pid-starttime-no-boot-id
+expect_reclaimed boot-pid-starttime-no-boot-id
+
+setup_case boot-short-boot-id
+printf '%s\n' "$DEAD_PID" > "$TMP/boot-short-boot-id/.service.lock/pid"
+printf '0000\n' > "$TMP/boot-short-boot-id/.service.lock/boot_id"
+run_boot boot-short-boot-id
+expect_reclaimed boot-short-boot-id
+
+# a lock that records the current boot (a rerun on a running system) is left alone
+setup_case boot-current-lock
+printf '%s\n' "$DEAD_PID" > "$TMP/boot-current-lock/.service.lock/pid"
+printf '%s\n' "$CURRENT_BOOT" > "$TMP/boot-current-lock/.service.lock/boot_id"
+sh "$TMP/boot-current-lock/post-fs-data.sh" || fail "boot-current-lock: post-fs-data.sh failed"
+[ -f "$TMP/boot-current-lock/.service.lock/pid" ] || fail "boot-current-lock: lock of the current boot was removed"
+
 # --- workers racing for one stale lock: at most one starts the daemon ---
 setup_case race
 printf '%s\n' "$DEAD_PID" > "$TMP/race/.service.lock/pid"
@@ -120,4 +157,4 @@ for p in $pids; do wait "$p" || true; done
 unset MOCK_SLEEP
 [ "$(runs race)" -eq 1 ] || fail "race: $(runs race) workers started the daemon over one stale lock"
 
-echo 'PASS: previous-boot locks reclaimed, current-boot partial locks untouched, one winner per stale lock'
+echo 'PASS: previous-boot locks reclaimed (also by post-fs-data), current-boot partial locks untouched, one winner per stale lock'
