@@ -290,7 +290,7 @@ object KeyBoxUtils {
                 "rsa" -> KeyProperties.KEY_ALGORITHM_RSA
                 else -> attrAlgo?.uppercase()
             }
-        if (attrNormalized != null && !attrNormalized.equals(derived, ignoreCase = true)) {
+        if (attrNormalized != null && !attrNormalized.equals(algorithmName, ignoreCase = true)) {
             Logger.w("Keybox algorithm attribute disagrees with parsed key; using parsed key")
         }
         val certs = certTexts.map { CertificateUtils.parseCertificate(it).getOrThrow() }
