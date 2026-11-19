@@ -64,6 +64,7 @@ run_test service-supervisor-faults.sh
 run_test service-supervisor-restart-cap.sh
 run_test service-supervisor-stale-boot.sh
 run_test module-scripts.sh
+run_test release-cleanup.sh
 
 if [ "$failures" -ne 0 ]; then
   echo "run.sh: $failures check(s) failed"
