@@ -63,6 +63,17 @@ is_service_process() {
 }
 
 lock_owner_state() {
+  # The lock survives a reboot: a complete boot_id of another boot marks it stale, whatever else
+  # is missing or left over. A shorter (partly written) boot_id is judged as before.
+  lock_stale_boot=0
+  lock_boot_id=$(cat "$LOCKDIR/boot_id" 2>/dev/null)
+  if [ -n "$lock_boot_id" ]; then
+    current_boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 2
+    if [ "${#lock_boot_id}" -eq "${#current_boot_id}" ] && [ "$lock_boot_id" != "$current_boot_id" ]; then
+      lock_stale_boot=1
+      return 1
+    fi
+  fi
   owner_pid=$(cat "$LOCKDIR/pid" 2>/dev/null)
   [ -n "$owner_pid" ] || return 2
   lock_boot_id=$(cat "$LOCKDIR/boot_id" 2>/dev/null)
@@ -94,13 +105,17 @@ run_supervisor() {
     owner_state=$?
     [ "$owner_state" -eq 0 ] && return 0
     [ "$owner_state" -eq 2 ] && return 0
-    if ! mkdir "$LOCKDIR/reap" 2>/dev/null; then
+    # reapers of a lock from another boot contend on a name of this boot, so a reap dir left
+    # behind by an earlier boot does not block them
+    reap_dir="$LOCKDIR/reap"
+    [ "$lock_stale_boot" -eq 1 ] && reap_dir="$LOCKDIR/reap.$current_boot_id"
+    if ! mkdir "$reap_dir" 2>/dev/null; then
       return 0
     fi
     lock_owner_state
     owner_state=$?
     if [ "$owner_state" -ne 1 ]; then
-      rmdir "$LOCKDIR/reap" 2>/dev/null || true
+      rmdir "$reap_dir" 2>/dev/null || true
       return 0
     fi
     rm -rf "$LOCKDIR"
