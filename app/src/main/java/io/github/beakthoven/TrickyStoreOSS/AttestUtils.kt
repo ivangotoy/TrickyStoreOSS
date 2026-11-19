@@ -95,6 +95,8 @@ object AttestUtils {
      * cached result is UNAVAILABLE and the back-off has passed; a final result replaces the cached one.
      */
     fun requestReprobe() {
+        // the legacy (pre-keystore2) probe re-installs the keystore provider; re-run it only on keystore2
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         if (cachedProbeResult?.status != ProbeStatus.UNAVAILABLE) return
         if (!reprobeDue(reprobeAttempts, SystemClock.elapsedRealtime() - unavailableSinceMs)) return
         if (!reprobeRunning.compareAndSet(false, true)) return
