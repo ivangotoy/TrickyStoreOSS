@@ -92,7 +92,13 @@ abstract class BaseKeystoreInterceptor : BinderInterceptor() {
             exitProcess(1)
         }
 
-        if (process.waitFor() != 0) {
+        val exitCode = process.waitFor()
+        if (exitCode != 0) {
+            // ./inject logs to logcat; its argument errors (e.g. an empty `pidof`) and sh errors go to stderr only
+            val stderr = runCatching {
+                process.errorStream.use { s -> String(s.readNBytes(minOf(s.available(), 4096))).trim() }
+            }.getOrDefault("")
+            Logger.e("Injector exited with status $exitCode" + if (stderr.isNotEmpty()) ": $stderr" else "")
             Logger.e("Injection failed! Daemon will exit")
             exitProcess(1)
         }
