@@ -153,7 +153,8 @@ object PkgConfig {
     }
 
     private fun currentProbe(): AttestUtils.ProbeResult {
-        probe?.let { return it }
+        // a background re-probe may have replaced an UNAVAILABLE result: refresh the latch and tee_status once
+        probe?.takeIf { AttestUtils.cachedResult.let { latest -> latest == null || latest === it } }?.let { return it }
         storeTEEStatus(root)
         return probe ?: AttestUtils.probeResult.also { probe = it }
     }
@@ -236,6 +237,7 @@ object PkgConfig {
                 ProbeStatus.FAILED -> Mode.GENERATE
                 ProbeStatus.UNAVAILABLE -> null
             }
+            if (autoMode == null && ps.any { packageModes[it] == Mode.AUTO }) AttestUtils.requestReprobe()
             ps.any { pkg ->
                 when (packageModes[pkg]) {
                     targetMode -> true

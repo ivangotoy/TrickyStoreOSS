@@ -74,6 +74,58 @@ object AttestUtils {
     private const val KEYSTORE_SERVICE = "android.system.keystore2.IKeystoreService/default"
     private const val PROBE_ALIAS_PREFIX = "TrickyStoreOSS_probe_"
 
+    // An UNAVAILABLE result (e.g. no RKP keys before connectivity, AAID provider timeout) is retried in the
+    // background, triggered by keystore calls of AUTO packages; AVAILABLE and FAILED stay final.
+    private const val REPROBE_MAX_ATTEMPTS = 6
+    private const val REPROBE_FIRST_DELAY_MS = 30_000L
+    private val reprobeRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var reprobeAttempts = 0
+    @Volatile private var unavailableSinceMs = 0L
+
+    /** Cached result without probing; null before the startup probe has finished. */
+    val cachedResult: ProbeResult?
+        get() = cachedProbeResult
+
+    /** Whether re-probe attempt [attempts] (0-based) is due [elapsedMs] after the last UNAVAILABLE result. */
+    fun reprobeDue(attempts: Int, elapsedMs: Long): Boolean =
+        attempts in 0 until REPROBE_MAX_ATTEMPTS && elapsedMs >= (REPROBE_FIRST_DELAY_MS shl attempts)
+
+    /**
+     * Called from binder threads: never probes or blocks there. Starts at most one background attempt when the
+     * cached result is UNAVAILABLE and the back-off has passed; a final result replaces the cached one.
+     */
+    fun requestReprobe() {
+        if (cachedProbeResult?.status != ProbeStatus.UNAVAILABLE) return
+        if (!reprobeDue(reprobeAttempts, SystemClock.elapsedRealtime() - unavailableSinceMs)) return
+        if (!reprobeRunning.compareAndSet(false, true)) return
+        // re-check under the flag: an attempt may have finished between the checks above and the flag
+        if (cachedProbeResult?.status != ProbeStatus.UNAVAILABLE ||
+            !reprobeDue(reprobeAttempts, SystemClock.elapsedRealtime() - unavailableSinceMs)) {
+            reprobeRunning.set(false)
+            return
+        }
+        val attempt = ++reprobeAttempts
+        runCatching {
+            Thread({
+                try {
+                    val result = probeOnce()
+                    if (result.status == ProbeStatus.UNAVAILABLE) {
+                        unavailableSinceMs = SystemClock.elapsedRealtime()
+                        Logger.w("Attestation re-probe $attempt/$REPROBE_MAX_ATTEMPTS still unavailable (${result.failureCategory ?: "none"})")
+                    } else {
+                        cachedProbeResult = result
+                        Logger.i("Attestation re-probe $attempt/$REPROBE_MAX_ATTEMPTS status=${result.status} category=${result.failureCategory ?: "none"}")
+                    }
+                } catch (t: Throwable) {
+                    unavailableSinceMs = SystemClock.elapsedRealtime()
+                    Logger.e("Attestation re-probe $attempt failed", t)
+                } finally {
+                    reprobeRunning.set(false)
+                }
+            }, "ts-attest-reprobe").apply { isDaemon = true }.start()
+        }.onFailure { reprobeRunning.set(false) }
+    }
+
     @Synchronized
     fun probe(): ProbeResult {
         cachedProbeResult?.let { return it }
@@ -92,6 +144,7 @@ object AttestUtils {
                 break
             }
         }
+        unavailableSinceMs = SystemClock.elapsedRealtime()
         cachedProbeResult = result
         Logger.i(
             "Attestation probe status=${result.status} category=${result.failureCategory ?: "none"}" +
