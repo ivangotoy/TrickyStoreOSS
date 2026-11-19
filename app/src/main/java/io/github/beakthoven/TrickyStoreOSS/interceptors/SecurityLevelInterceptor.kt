@@ -369,7 +369,9 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         data: Parcel,
     ): Result {
         if (code == importKeyTransaction) {
-            return if (PkgConfig.needHack(callingUid) || PkgConfig.needGenerate(callingUid)) Continue else Skip
+            if (PkgConfig.needHack(callingUid) || PkgConfig.needGenerate(callingUid)) return Continue
+            // a real import replacing a forged alias (also of a uid no longer targeted) must reach the post-hook
+            return if (hasForgedAlias(callingUid, data)) Continue else Skip
         }
         if (code == generateKeyTransaction) {
             val startNanos = System.nanoTime()
@@ -648,6 +650,12 @@ class SecurityLevelInterceptor(private val original: IKeystoreSecurityLevel, pri
         }
         return Skip
     }
+
+    private fun hasForgedAlias(callingUid: Int, data: Parcel): Boolean =
+        runCatching {
+            data.enforceInterface(IKeystoreSecurityLevel.DESCRIPTOR)
+            data.readTypedObject(KeyDescriptor.CREATOR)?.alias?.let { keys.containsKey(Key(callingUid, it)) } == true
+        }.getOrDefault(false)
 
     private fun storeGeneratedKey(
         callingUid: Int,
