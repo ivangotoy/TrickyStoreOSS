@@ -1,8 +1,9 @@
 #!/bin/sh
-# .forgejo/module-ci.sh release: cleanup() deletes only a release the forge still reports as a draft.
+# .forgejo/module-ci.sh release: cleanup() deletes only a release the forge still reports as a draft,
+# and logs the tag when the draft request itself failed or lost its reply (no id to delete by).
 # The publish PATCH may be applied by the forge while its reply is lost; deleting on "PUBLISHED != 1"
 # alone then removes a published release. Real: log/die/jget/api/cleanup and the publish statements
-# (REQ= .. PUBLISHED=1) cut from module-ci.sh; stubbed: curl (fake forge at https://forge.invalid).
+# (REQ= .. PUBLISHED=1) and the draft request (DRAFT_REQUESTED=1 .. RELEASE_ID=) cut from module-ci.sh; stubbed: curl (fake forge at https://forge.invalid).
 set -u
 
 ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
@@ -23,22 +24,26 @@ fail() {
 {
   echo 'set -euo pipefail'
   echo 'API=https://forge.invalid/api/v1/repos/example/mod RELEASE_ID=7 PUBLISHED=0 SRC_SHA=0123456789abcdef0123456789abcdef01234567'
+  echo 'DRAFT_REQUESTED=0 TAG=v9.9-ci7 REQ={}'
   echo 'AUTH_DIR=$(mktemp -d) AUTH_H=$AUTH_DIR/header; : > "$AUTH_H"'
   sed -n '/^log() {/p; /^die() {/p; /^jget() {/,/^print(d)/p; /^api() {/,/^}/p; /^cleanup() {/,/^}/p' "$CI_SCRIPT"
   echo 'trap cleanup EXIT'
-  echo 'if [ "$1" = publish ]; then'
+  echo 'if [ "$1" = create ]; then RELEASE_ID=""'
+  sed -n '/^DRAFT_REQUESTED=1$/,/^RELEASE_ID="\$(api POST \/releases /p' "$CI_SCRIPT"
+  echo 'elif [ "$1" = publish ]; then'
   sed -n '/^REQ="\$(python3 -I -c .import json,sys;print(json.dumps({"draft":False/,/^PUBLISHED=1$/p' "$CI_SCRIPT"
   echo 'else die "upload failed"; fi'
 } > "$TMP/rel.sh"
 grep -q '^PUBLISHED=1$' "$TMP/rel.sh" && grep -q '^cleanup() {' "$TMP/rel.sh" && grep -q '^api() {' "$TMP/rel.sh" ||
   fail "cleanup()/api()/publish statements not found in module-ci.sh"
 
-# fake curl: logs "METHOD URL"; PATCH exits $PATCH_RC; GET of the release answers draft=$DRAFT or fails (DRAFT=fail)
+# fake curl: logs "METHOD URL"; POST exits $POST_RC, PATCH $PATCH_RC; GET of the release answers draft=$DRAFT or fails (DRAFT=fail)
 cat > "$TMP/bin/curl" <<EOF
 #!/bin/sh
 m=GET; p=; for a in "\$@"; do [ "\$p" = -X ] && m=\$a; p=\$a; u=\$a; done
 echo "\$m \$u" >> "$TMP/calls"
 case "\$m" in
+  POST) exit "\${POST_RC:-0}" ;;
   PATCH) exit "\${PATCH_RC:-0}" ;;
   GET) [ "\$DRAFT" = fail ] && exit 22; printf '{"id": 7, "draft": %s}' "\$DRAFT" ;;
 esac
@@ -71,4 +76,12 @@ rel publish DRAFT=false; rc=$?
 [ "$rc" -eq 0 ] || fail "good publish: exit $rc"
 ! grep -q '^DELETE ' "$TMP/calls" || fail "good publish: release deleted ($(calls))"
 
-echo 'PASS: release cleanup keeps a published or unknown release, deletes a confirmed draft'
+rel create POST_RC=28 DRAFT=true; rc=$?
+[ "$rc" -ne 0 ] || fail "failed or unanswered draft request: exit 0"
+grep -q '^POST ' "$TMP/calls" || fail "failed or unanswered draft request: no POST sent"
+! grep -q '^DELETE ' "$TMP/calls" || fail "failed or unanswered draft request: DELETE without an id ($(calls))"
+! grep -q 'unbound variable' "$TMP/err" || fail "failed or unanswered draft request: unbound variable"
+grep -q 'the draft request for v9.9-ci7 failed or its reply was lost' "$TMP/err" ||
+  fail "failed or unanswered draft request: tag not logged"
+
+echo 'PASS: release cleanup keeps a published or unknown release, deletes a confirmed draft, logs a lost draft request'
