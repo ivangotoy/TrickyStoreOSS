@@ -66,6 +66,7 @@ run_test service-supervisor-stale-boot.sh
 run_test module-scripts.sh
 run_test release-cleanup.sh
 run_test build-step.sh
+run_test workflow-dispatch.sh
 
 if [ "$failures" -ne 0 ]; then
   echo "run.sh: $failures check(s) failed"
