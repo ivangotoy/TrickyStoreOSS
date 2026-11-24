@@ -172,3 +172,7 @@ PRs welcome. Thanks for backing real open-source work.
 - [PLTI](https://github.com/PerformanC/PLTI)
 - [LSPosed](https://github.com/LSPosed/LSPosed)
 - [PlayIntegrityFork](https://github.com/osm0sis/PlayIntegrityFork)
+
+## More KernelSU modules
+
+Check out my other great KernelSU modules here: https://git.digtvbg.com/explore/repos?q=kernelsu-module&topic=1
