@@ -118,8 +118,9 @@ run_supervisor() {
       rmdir "$reap_dir" 2>/dev/null || true
       return 0
     fi
-    # take the stale lock off the lock path in one rename, then delete it: a worker reading the
-    # path mid-delete would judge the leftover with the other reap dir name and reap it as well
+    # take the stale lock off the lock path in one rename, then delete it: deleting in place also
+    # removes this reaper's own reap dir, so a worker reading the half-deleted lock could take a
+    # reap dir of its own (same name, or the legacy one once boot_id is gone) and reap it as well
     mv "$LOCKDIR" "$LOCKDIR.reaped.$$" 2>/dev/null || return 0
     rm -rf "$LOCKDIR.reaped.$$"
     if ! mkdir "$LOCKDIR" 2>/dev/null; then
