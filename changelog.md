@@ -30,3 +30,7 @@
 
 **Full Changelog**: https://github.com/beakthoven/TrickyStoreOSS/compare/v3.0.0...v3.1.0
 
+### Fork build (Forgejo)
+
+- Keybox: an EC private key in SEC1 form (`EC PRIVATE KEY`) without its optional public key now loads; the public key is derived from the private key instead of the keybox being rejected.
+- Software key operations: the RSA signing (Digest NONE) and decryption engines end the operation with KM_ERROR_INVALID_INPUT_LENGTH when the input is longer than the key allows, instead of a later VERIFICATION_FAILED or a raw provider exception.
