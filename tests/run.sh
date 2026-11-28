@@ -65,6 +65,7 @@ run_test service-supervisor-restart-cap.sh
 run_test service-supervisor-stale-boot.sh
 run_test module-scripts.sh
 run_test release-cleanup.sh
+run_test release-version.sh
 run_test build-step.sh
 run_test workflow-dispatch.sh
 run_test workflow-concurrency.sh

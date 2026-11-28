@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generic KernelSU module release pipeline (identical in every module repo).
+# Generic KernelSU module release pipeline (this repo's copy).
 #
 #   module-ci.sh build <workdir>    no forge token: merge upstream, build the zip
 #                                   (the build runs as an unprivileged user)
@@ -17,7 +17,8 @@
 #   UPSTREAM_URL, UPSTREAM_BRANCH   upstream merged into main ("" = none)
 #   ZIP_PREFIX                      release zip name prefix
 #   VERSION_CODE_FLOOR              lowest versionCode allowed to release
-#   VERSION_CODE_OFFSET             added to the built versionCode (default 0)
+#   VERSION_CODE_OFFSET             added to the built versionCode (default 0); a result at or below
+#                                   the live update.json or a published release is raised above both
 #   UPDATE_JSON_PATH                update.json path in main (default .forgejo/update.json)
 #   SYNC_ROOT_PROP                  fork-owned module.prop in main kept at the released version
 #   CHANGELOG_PATH                  changelog file in the tree ("" = none)
@@ -177,6 +178,31 @@ BUILT_VC="$(prop_get versionCode "$REL/built.prop")"
 case "$BUILT_VC" in ''|*[!0-9]*) die "built versionCode '$BUILT_VC' is not a number" ;; esac
 VERSION="$(printf '%s' "$BUILT_VERSION" | sed -E 's/-(fork|ci)[0-9]+$//')-ci$RUN_NUMBER"
 VC=$((BUILT_VC + VERSION_CODE_OFFSET))
+# The updater offers a release only above the versionCode it already has: never publish at or
+# below the live feed (update.json on main's tip, which may be past BASE_SHA) or the highest
+# published release (its body carries "versionCode N"). Unreadable values stop the release here.
+if git cat-file -e "origin/main:$UPDATE_JSON_PATH" 2>/dev/null; then
+    FEED_VC="$(git show "origin/main:$UPDATE_JSON_PATH" | python3 -I -c 'import json,sys
+v=json.load(sys.stdin)["versionCode"]
+if type(v) is not int or v < 0: sys.exit("versionCode is not a non-negative integer")
+print(v)')" || die "$UPDATE_JSON_PATH on main has no readable versionCode"
+else
+    FEED_VC=0
+fi
+REL_VC="$(api GET "/releases?limit=50" | python3 -I -c 'import json,re,sys
+m=0
+for r in json.load(sys.stdin):
+    if r["draft"]: continue
+    for line in (r.get("body") or "").splitlines():
+        x=re.fullmatch(r"versionCode ([0-9]+)\s*", line)
+        if x: m=max(m,int(x.group(1)))
+print(m)')" || die "cannot read the published releases"
+[[ "$FEED_VC" =~ ^[0-9]+$ && "$REL_VC" =~ ^[0-9]+$ ]] || die "bad published versionCode '$FEED_VC' / '$REL_VC'"
+LAST_VC=$((FEED_VC > REL_VC ? FEED_VC : REL_VC))
+if [ "$VC" -le "$LAST_VC" ]; then
+    log "versionCode $VC is not above the published $LAST_VC: using $((LAST_VC + 1))"
+    VC=$((LAST_VC + 1))
+fi
 [ "$VC" -ge "$VERSION_CODE_FLOOR" ] || die "versionCode $VC is below the floor $VERSION_CODE_FLOOR"
 TAG="$(printf '%s' "$VERSION" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/-+/-/g; s/^-//; s/-$//')"
 case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
