@@ -31,7 +31,12 @@ setup_case() {
   cat > "$dir/daemon" <<'MOCK'
 #!/bin/sh
 echo run >> "$MOCK_LOG"
-[ -n "${MOCK_SLEEP:-}" ] && sleep "$MOCK_SLEEP"
+# MOCK_WAIT_FOR="<file> <n>": keep running (at most 60 s) until <file> has <n> lines
+if [ -n "${MOCK_WAIT_FOR:-}" ]; then
+  set -- $MOCK_WAIT_FOR
+  i=0
+  while [ "$(wc -l < "$1")" -lt "$2" ] && [ "$i" -lt 60 ]; do sleep 1; i=$((i + 1)); done
+fi
 exit 7
 MOCK
   chmod +x "$dir/daemon"
@@ -154,14 +159,48 @@ setup_case race
 printf '%s\n' "$DEAD_PID" > "$TMP/race/.service.lock/pid"
 printf '%s\n' "$OLD_BOOT" > "$TMP/race/.service.lock/boot_id"
 printf '1\n' > "$TMP/race/.service.lock/starttime"
-export MOCK_SLEEP=2
+# the winner's daemon holds the lock until the three other workers have given up, so a late
+# worker cannot find the lock already released
+: > "$TMP/race/finished"
+export MOCK_WAIT_FOR="$TMP/race/finished 3"
 pids=
 for n in 1 2 3 4; do
-  run_worker race &
+  (run_worker race; echo "$n" >> "$TMP/race/finished") &
   pids="$pids $!"
 done
 for p in $pids; do wait "$p" || true; done
-unset MOCK_SLEEP
+unset MOCK_WAIT_FOR
 [ "$(runs race)" -eq 1 ] || fail "race: $(runs race) workers started the daemon over one stale lock"
+
+# --- the interleaving the race case can only hope for: a worker judged the lock stale, and before it
+# takes the reap dir another worker has replaced the lock with its own (pid and boot_id written,
+# starttime not yet). A mkdir stub makes that swap right before the reap dir is created; the recheck
+# under the reap dir must then leave the new lock alone.
+setup_case race-recheck
+printf '%s\n' "$DEAD_PID" > "$TMP/race-recheck/.service.lock/pid"
+printf '%s\n' "$OLD_BOOT" > "$TMP/race-recheck/.service.lock/boot_id"
+printf '1\n' > "$TMP/race-recheck/.service.lock/starttime"
+real_mkdir=$(command -v mkdir)
+mkdir -p "$TMP/race-recheck/bin"
+cat > "$TMP/race-recheck/bin/mkdir" <<EOF
+#!/bin/sh
+case "\$1" in
+  */.service.lock/reap*)
+    echo swapped >> "$TMP/race-recheck/stub"
+    rm -f "$TMP/race-recheck/.service.lock/starttime"
+    printf '%s\n' "$CURRENT_BOOT" > "$TMP/race-recheck/.service.lock/boot_id"
+    printf '%s\n' "$$" > "$TMP/race-recheck/.service.lock/pid"
+    ;;
+esac
+exec "$real_mkdir" "\$@"
+EOF
+chmod +x "$TMP/race-recheck/bin/mkdir"
+(PATH="$TMP/race-recheck/bin:$PATH"; export PATH; run_worker race-recheck)
+if [ -f "$TMP/race-recheck/stub" ]; then
+  expect_untouched race-recheck
+  [ "$(cat "$TMP/race-recheck/.service.lock/boot_id")" = "$CURRENT_BOOT" ] || fail "race-recheck: the new owner's lock was replaced"
+else
+  echo 'SKIP: race-recheck (this shell does not run mkdir from PATH)'
+fi
 
 echo 'PASS: previous-boot locks reclaimed (also by post-fs-data), current-boot partial locks untouched, one winner per stale lock'
