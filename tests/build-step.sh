@@ -52,4 +52,46 @@ for kind in ok failed; do
   grep -q 'kill-requested .*--reuid=1000 .*kill -9 -1' "$w/setpriv.log" || fail "$kind build: build user's processes not killed"
 done
 
-echo "PASS: build step kills the build user's processes after a passing and a failing build"
+# The real build() of .forgejo/module-ci.conf (no upstream merge here: UPSTREAM_URL cleared) runs
+# tests/run.sh before Gradle, with its TMPDIR under the build user's HOME. The fixture's suite
+# records its TMPDIR and passes or fails; the gradlew stub refuses to run unless that record is
+# there, then leaves a release zip in out/.
+for kind in suite-ok suite-failed; do
+  w="$TMP/$kind"
+  mkdir -p "$w/.forgejo" "$w/tests"
+  cp "$ROOT/.forgejo/module-ci.sh" "$ROOT/.forgejo/module-ci.conf" "$w/.forgejo/"
+  printf '\nUPSTREAM_URL=""\n' >> "$w/.forgejo/module-ci.conf"
+  rc_suite=0
+  [ "$kind" = suite-failed ] && rc_suite=1
+  printf '#!/bin/sh\nprintf "%%s\\n" "$TMPDIR" > "$HOME/suite-tmpdir"\necho "stub suite rc=%s" >&2\nexit %s\n' \
+    "$rc_suite" "$rc_suite" > "$w/tests/run.sh"
+  cat > "$w/gradlew" <<'EOF'
+#!/bin/sh
+echo "$*" > "$HOME/gradle-ran"
+read -r t < "$HOME/suite-tmpdir" || exit 3
+case "$t" in "$HOME"/*) ;; *) exit 4 ;; esac
+mkdir -p out && echo zip > out/stub-Release.zip
+EOF
+  (cd "$w" && git init -q && git add -A && git -c user.name=t -c user.email=t@example.invalid commit -qm t) > /dev/null 2>&1 ||
+    fail "$kind: fixture repo"
+  : > "$w/setpriv.log"
+  rc=0
+  (cd "$w" && env PATH="$TMP/bin:$PATH" SETPRIV_LOG="$w/setpriv.log" SERVER_URL=https://forge.invalid \
+    REPOSITORY=owner/repo BASE_SHA="$(git rev-parse HEAD)" bash .forgejo/module-ci.sh build "$w") > "$w/out.log" 2>&1 || rc=$?
+  grep -q "stub suite rc=$rc_suite" "$w/out.log" || fail "$kind: tests/run.sh did not run ($(tail -n 2 "$w/out.log" | tr '\n' ' '))"
+  case "$(cat "$w/.ci-home/suite-tmpdir" 2>/dev/null)" in
+    "$w/.ci-home"/*) ;;
+    *) fail "$kind: suite TMPDIR not under the build user's HOME: '$(cat "$w/.ci-home/suite-tmpdir" 2>/dev/null)'" ;;
+  esac
+  if [ "$kind" = suite-ok ]; then
+    [ "$rc" -eq 0 ] && [ -f "$w/.ci-out/module.zip" ] || fail "passing suite: build rc=$rc, $(tail -n 2 "$w/out.log" | tr '\n' ' ')"
+    [ -f "$w/.ci-home/gradle-ran" ] || fail "passing suite: Gradle did not run"
+  else
+    [ "$rc" -ne 0 ] || fail "failing suite: build exit 0"
+    [ ! -e "$w/.ci-home/gradle-ran" ] || fail "failing suite: Gradle ran after the suite failed"
+    [ ! -e "$w/.ci-out/module.zip" ] || fail "failing suite: a module zip was left"
+  fi
+  grep -q 'kill-requested .*--reuid=1000 .*kill -9 -1' "$w/setpriv.log" || fail "$kind build: build user's processes not killed"
+done
+
+echo "PASS: build step kills the build user's processes after a passing and a failing build; build() runs the suite before Gradle"
