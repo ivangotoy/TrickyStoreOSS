@@ -89,6 +89,7 @@ dependencies {
     compileOnly(libs.annotation)
     implementation(libs.org.bouncycastle.bcpkix.jdk18on)
     implementation(libs.org.lsposed.libcxx.libcxx)
+    testImplementation(libs.junit)
 }
 
 androidComponents {
