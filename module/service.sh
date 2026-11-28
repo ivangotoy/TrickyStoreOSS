@@ -118,7 +118,10 @@ run_supervisor() {
       rmdir "$reap_dir" 2>/dev/null || true
       return 0
     fi
-    rm -rf "$LOCKDIR"
+    # take the stale lock off the lock path in one rename, then delete it: a worker reading the
+    # path mid-delete would judge the leftover with the other reap dir name and reap it as well
+    mv "$LOCKDIR" "$LOCKDIR.reaped.$$" 2>/dev/null || return 0
+    rm -rf "$LOCKDIR.reaped.$$"
     if ! mkdir "$LOCKDIR" 2>/dev/null; then
       return 0
     fi

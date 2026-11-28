@@ -42,10 +42,12 @@ MOCK
   chmod +x "$dir/daemon"
 }
 
-# run_worker <name>: one foreground worker with a failure budget of one run.
+# run_worker <name>: one foreground worker with a failure budget of one run (every run counts as a
+# failure, so a held mock daemon is never restarted).
 run_worker() {
   dir="$TMP/$1"
-  (cd "$dir" && MOCK_LOG="$dir/runs" TSOSS_SUPERVISOR_MAX_FAILURES=1 TSOSS_SUPERVISOR_FOREGROUND=true \
+  (cd "$dir" && MOCK_LOG="$dir/runs" TSOSS_SUPERVISOR_MAX_FAILURES=1 TSOSS_SUPERVISOR_STABILITY_SECONDS=86400 \
+    TSOSS_SUPERVISOR_FOREGROUND=true \
     sh ./service.sh --worker) > "$dir/log" 2>&1 || true
 }
 
@@ -202,5 +204,47 @@ if [ -f "$TMP/race-recheck/stub" ]; then
 else
   echo 'SKIP: race-recheck (this shell does not run mkdir from PATH)'
 fi
+
+# --- a worker arriving while a reaper deletes a stale lock must not reap it as well. A PATH stub for
+# rm, at the reaper's delete of the stale lock, first removes the lock's boot_id and starttime (as far
+# as a delete may have got), then starts a second worker and lets the delete go on once that worker
+# has started its daemon or exited. Daemons hold until released, so two owners would run at once.
+setup_case reap-mid
+printf '%s\n' "$DEAD_PID" > "$TMP/reap-mid/.service.lock/pid"
+printf '%s\n' "$OLD_BOOT" > "$TMP/reap-mid/.service.lock/boot_id"
+printf '1\n' > "$TMP/reap-mid/.service.lock/starttime"
+: > "$TMP/reap-mid/release"
+real_rm=$(command -v rm)
+mkdir -p "$TMP/reap-mid/bin"
+cat > "$TMP/reap-mid/bin/rm" <<EOF
+#!/bin/sh
+for a in "\$@"; do t=\$a; done
+case "\$t" in
+  "$TMP/reap-mid/.service.lock"|"$TMP/reap-mid/.service.lock.reaped."*)
+    if [ ! -e "$TMP/reap-mid/injected" ]; then
+      : > "$TMP/reap-mid/injected"
+      "$real_rm" -f "\$t/boot_id" "\$t/starttime"
+      (cd "$TMP/reap-mid" && sh ./service.sh --worker > "$TMP/reap-mid/second.log" 2>&1; : > "$TMP/reap-mid/second-done") &
+      i=0
+      while [ ! -s "$TMP/reap-mid/runs" ] && [ ! -e "$TMP/reap-mid/second-done" ] && [ "\$i" -lt 20 ]; do sleep 1; i=\$((i + 1)); done
+    fi
+    ;;
+esac
+exec "$real_rm" "\$@"
+EOF
+chmod +x "$TMP/reap-mid/bin/rm"
+export MOCK_WAIT_FOR="$TMP/reap-mid/release 1"
+(PATH="$TMP/reap-mid/bin:$PATH"; export PATH; run_worker reap-mid; : > "$TMP/reap-mid/first-done") &
+first=$!
+i=0
+while [ ! -e "$TMP/reap-mid/first-done" ] && [ "$(runs reap-mid)" -lt 2 ] && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
+held=$(runs reap-mid)
+echo release >> "$TMP/reap-mid/release"
+wait "$first" || true
+i=0
+while [ -e "$TMP/reap-mid/injected" ] && [ ! -e "$TMP/reap-mid/second-done" ] && [ "$i" -lt 70 ]; do sleep 1; i=$((i + 1)); done
+unset MOCK_WAIT_FOR
+[ -e "$TMP/reap-mid/injected" ] || fail "reap-mid: the stale lock was never deleted through rm"
+[ "$held" -eq 1 ] || fail "reap-mid: $held daemons ran at once over one stale lock"
 
 echo 'PASS: previous-boot locks reclaimed (also by post-fs-data), current-boot partial locks untouched, one winner per stale lock'
