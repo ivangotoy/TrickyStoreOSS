@@ -109,7 +109,8 @@ object CertificateUtils {
             // openssl ecparam -genkey writes an EC PARAMETERS block ahead of the key
             while (parsed is ASN1ObjectIdentifier || parsed is X9ECParameters) parsed = parser.readObject()
             when (parsed) {
-                is PEMKeyPair -> parsed
+                // SEC1 (EC PRIVATE KEY) may omit its optional public key: derive it as for PKCS#8
+                is PEMKeyPair -> if (parsed.publicKeyInfo == null) pkcs8KeyPair(parsed.privateKeyInfo) else parsed
                 is PrivateKeyInfo -> pkcs8KeyPair(parsed)
                 else -> throw IllegalStateException("Invalid PEM key pair format")
             }
