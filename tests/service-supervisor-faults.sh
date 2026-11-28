@@ -258,6 +258,21 @@ wait "$lock_owner" 2>/dev/null || true
 lock_owner=
 [ ! -e "$TMP/signaled/.service.lock" ] || fail "terminated worker left its lock behind"
 
+# Run as `sh service.sh` from the module dir ($0 without a slash): MODDIR is still that dir.
+mkdir -p "$TMP/bare"
+cp "$SERVICE" "$TMP/bare/service.sh"
+cat > "$TMP/bare/daemon" <<'MOCK'
+#!/bin/sh
+printf '%s\n' "$1" >> "$MOCK_LOG"
+exit 7
+MOCK
+chmod +x "$TMP/bare/daemon"
+export MOCK_LOG="$TMP/bare/invocations"
+: > "$MOCK_LOG"
+(cd "$TMP/bare" && TSOSS_SUPERVISOR_MAX_FAILURES=1 TSOSS_SUPERVISOR_FOREGROUND=true sh service.sh --worker) > "$TMP/bare/log" 2>&1 || true
+[ "$(cat "$MOCK_LOG")" = "$(cd "$TMP/bare" && pwd)" ] || fail "bare-name worker did not run the daemon with its module dir ($(tr '\n' ' ' < "$TMP/bare/log"))"
+[ ! -e "$TMP/bare/.service.lock" ] || fail "bare-name worker left its lock"
+
 if grep -Eiq 'keystore2?|stop-service|ctl\.stop' "$SERVICE"; then
   fail "supervisor must not restart/stop a keystore service"
 fi
