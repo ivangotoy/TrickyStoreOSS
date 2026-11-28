@@ -142,6 +142,13 @@ printf '%s\n' "$CURRENT_BOOT" > "$TMP/boot-current-lock/.service.lock/boot_id"
 sh "$TMP/boot-current-lock/post-fs-data.sh" || fail "boot-current-lock: post-fs-data.sh failed"
 [ -f "$TMP/boot-current-lock/.service.lock/pid" ] || fail "boot-current-lock: lock of the current boot was removed"
 
+# run as `sh post-fs-data.sh` from the module dir ($0 without a slash): MODDIR is still that dir
+setup_case boot-bare-name
+printf '%s\n' "$DEAD_PID" > "$TMP/boot-bare-name/.service.lock/pid"
+printf '%s\n' "$OLD_BOOT" > "$TMP/boot-bare-name/.service.lock/boot_id"
+(cd "$TMP/boot-bare-name" && sh post-fs-data.sh) || fail "boot-bare-name: post-fs-data.sh failed"
+[ ! -e "$TMP/boot-bare-name/.service.lock" ] || fail "boot-bare-name: lock of a previous boot kept when run by bare name"
+
 # --- workers racing for one stale lock: at most one starts the daemon ---
 setup_case race
 printf '%s\n' "$DEAD_PID" > "$TMP/race/.service.lock/pid"
