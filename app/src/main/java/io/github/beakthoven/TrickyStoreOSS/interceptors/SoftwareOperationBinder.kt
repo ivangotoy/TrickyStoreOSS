@@ -188,13 +188,35 @@ private sealed interface OpEngine {
     fun finish(data: ByteArray?, signature: ByteArray?): ByteArray?
 }
 
-private class SignatureEngine(private val signature: Signature, private val verify: Boolean) : OpEngine {
+// KeyMint IKeyMintOperation: RSA input longer than the key -> INVALID_INPUT_LENGTH from update(), and finish()
+// must consume all data or return INVALID_INPUT_LENGTH (providers would fail later with another error, or throw raw)
+private class RsaInputLimit(private val updateMax: Int, private val finishMax: Int) {
+    private var received = 0L
+
+    fun onUpdate(data: ByteArray?) = add(data, updateMax)
+
+    fun onFinish(data: ByteArray?) = add(data, finishMax)
+
+    private fun add(data: ByteArray?, max: Int) {
+        if (data != null) received += data.size
+        if (received > max)
+            throw ServiceSpecificException(KeymasterDefs.KM_ERROR_INVALID_INPUT_LENGTH, "Input longer than the RSA key allows")
+    }
+}
+
+private class SignatureEngine(
+    private val signature: Signature,
+    private val verify: Boolean,
+    private val limit: RsaInputLimit? = null,
+) : OpEngine {
     override fun update(data: ByteArray?): ByteArray? {
+        limit?.onUpdate(data)
         if (data != null) signature.update(data)
         return null
     }
 
     override fun finish(data: ByteArray?, signature: ByteArray?): ByteArray? {
+        limit?.onFinish(data)
         if (data != null) this.signature.update(data)
         return if (verify) {
             if (signature == null || !this.signature.verify(signature))
@@ -228,7 +250,7 @@ private class MacEngine(private val mac: Mac, private val verify: Boolean) : OpE
     }
 }
 
-private class CipherEngine(private val cipher: Cipher) : OpEngine {
+private class CipherEngine(private val cipher: Cipher, private val limit: RsaInputLimit? = null) : OpEngine {
     override val beginParameters: Array<KeyParameter>? =
         cipher.iv?.let {
             arrayOf(
@@ -239,14 +261,19 @@ private class CipherEngine(private val cipher: Cipher) : OpEngine {
             )
         }
 
-    override fun update(data: ByteArray?): ByteArray? = data?.let { cipher.update(it) }
+    override fun update(data: ByteArray?): ByteArray? {
+        limit?.onUpdate(data)
+        return data?.let { cipher.update(it) }
+    }
 
     override fun updateAad(data: ByteArray?) {
         if (data != null) cipher.updateAAD(data)
     }
 
-    override fun finish(data: ByteArray?, signature: ByteArray?): ByteArray? =
-        if (data != null) cipher.doFinal(data) else cipher.doFinal()
+    override fun finish(data: ByteArray?, signature: ByteArray?): ByteArray? {
+        limit?.onFinish(data)
+        return if (data != null) cipher.doFinal(data) else cipher.doFinal()
+    }
 }
 
 private class KeyAgreementEngine(private val agreement: KeyAgreement) : OpEngine {
@@ -372,6 +399,7 @@ private constructor(
             val digest = effective.digest
             val padding = effective.padding
             val blockMode = op.blockMode.takeIf { it != 0 } ?: p.blockMode.firstOrNull()
+            val rsaKeyBytes = (info.keyPair?.public as? java.security.interfaces.RSAPublicKey)?.let { (it.modulus.bitLength() + 7) / 8 }
             val engine: OpEngine =
                 try {
                     when (p.algorithm) {
@@ -405,6 +433,10 @@ private constructor(
                                         initSign(info.keyPair!!.private)
                                     },
                                     false,
+                                    // undigested RSA signing; PKCS#1 v1.5 padding needs 11 bytes of the block
+                                    rsaKeyBytes?.takeIf { digest == KeymasterDefs.KM_DIGEST_NONE }?.let {
+                                        RsaInputLimit(it, if (padding == KeymasterDefs.KM_PAD_RSA_PKCS1_1_5_SIGN) it - 11 else it)
+                                    },
                                 )
                             KeyPurpose.VERIFY ->
                                 SignatureEngine(
@@ -419,7 +451,10 @@ private constructor(
                                 )
                             KeyPurpose.ENCRYPT,
                             KeyPurpose.DECRYPT ->
-                                CipherEngine(buildCipher(p, op, digest, effective.mgfDigest, padding, blockMode, info, purpose))
+                                CipherEngine(
+                                    buildCipher(p, op, digest, effective.mgfDigest, padding, blockMode, info, purpose),
+                                    rsaKeyBytes?.let { RsaInputLimit(it, it) },
+                                )
                             else ->
                                 throw ServiceSpecificException(
                                     KeymasterDefs.KM_ERROR_UNSUPPORTED_PURPOSE,
