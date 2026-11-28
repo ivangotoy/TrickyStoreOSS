@@ -226,8 +226,11 @@ status=$(run_daemon daemon-apk)
 grep -qx -- "-Djava.class.path=$TMP/daemon-apk/mod/service.apk" "$TMP/daemon-apk/app_process.args" ||
   fail "daemon did not fall back to service.apk"
 
-# --- post-fs-data.sh: must succeed without a supervisor lock ---
-sh "$MODULE/post-fs-data.sh" || fail "post-fs-data.sh failed"
+# --- post-fs-data.sh: must succeed without a supervisor lock (a copy: its MODDIR is the
+# script's own directory, so the source tree's module/ is never touched) ---
+mkdir -p "$TMP/post-fs-data"
+cp "$MODULE/post-fs-data.sh" "$TMP/post-fs-data/post-fs-data.sh"
+sh "$TMP/post-fs-data/post-fs-data.sh" || fail "post-fs-data.sh failed"
 
 # --- update-binary: refuses without Magisk, hands over to install_module ---
 run_update_binary() {
